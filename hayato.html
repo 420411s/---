@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIクーモ 座席抽選システム (BAN-GIME仕様)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Noto+Sans+JP:wght@300;400;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background-color: #050505;
+            color: #e0e0e0;
+            overflow: hidden;
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .tech-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* -------------------------------------
+         * 実体のない雲型AI（ハヤト）のスタイリング
+         * ------------------------------------- */
+        .ai-cloud-container {
+            position: relative;
+            width: 280px;
+            height: 280px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .ai-cloud-1, .ai-cloud-2 {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 240px;
+            height: 240px;
+            margin-top: -120px;
+            margin-left: -120px;
+            border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
+            filter: blur(15px);
+            opacity: 0.8;
+            transition: all 0.5s ease;
+        }
+
+        /* 通常時の青い発光 */
+        .ai-cloud-1 {
+            background: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+            animation: morph 6s ease-in-out infinite, rotate 12s linear infinite;
+            box-shadow: 0 0 50px rgba(0, 242, 254, 0.4);
+        }
+
+        .ai-cloud-2 {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            animation: morph 8s ease-in-out infinite reverse, rotate 18s linear infinite reverse;
+            opacity: 0.6;
+        }
+
+        /* 思考時（抽選中）の赤い発光（別班カラー） */
+        .ai-cloud-container.thinking .ai-cloud-1 {
+            background: linear-gradient(135deg, #ff0844 0%, #ffb199 100%);
+            animation-duration: 2s; /* 動きを速くする */
+            box-shadow: 0 0 70px rgba(255, 8, 68, 0.6);
+        }
+        
+        .ai-cloud-container.thinking .ai-cloud-2 {
+            background: linear-gradient(135deg, #ffb199 0%, #ff0844 100%);
+            animation-duration: 3s;
+        }
+
+        @keyframes morph {
+            0%, 100% { border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%; }
+            34% { border-radius: 70% 30% 50% 50% / 30% 30% 70% 70%; }
+            67% { border-radius: 100% 60% 60% 100% / 100% 100% 60% 60%; }
+        }
+
+        @keyframes rotate {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .ai-core {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 50%;
+            filter: blur(8px);
+            z-index: 10;
+            transition: background 0.5s;
+        }
+
+        .ai-cloud-container.thinking .ai-core {
+            background: rgba(255, 200, 200, 0.9);
+        }
+
+        /* -------------------------------------
+         * テキスト・UIのスタイリング
+         * ------------------------------------- */
+        .terminal {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 242, 254, 0.3);
+            border-left: 4px solid #00f2fe;
+            border-radius: 4px;
+            padding: 1.2rem;
+            min-height: 90px;
+            color: #00f2fe;
+            text-shadow: 0 0 5px rgba(0, 242, 254, 0.3);
+            margin: 2rem auto;
+            width: 90%;
+            max-width: 600px;
+            position: relative;
+            box-shadow: inset 0 0 20px rgba(0, 242, 254, 0.1);
+        }
+
+        .terminal.thinking-mode {
+            border-left: 4px solid #ff0844;
+            color: #ffb199;
+            text-shadow: 0 0 5px rgba(255, 8, 68, 0.5);
+            border-color: rgba(255, 8, 68, 0.3);
+            box-shadow: inset 0 0 20px rgba(255, 8, 68, 0.1);
+        }
+
+        .terminal::before {
+            content: 'SYSTEM LOG // AI_KU-MO';
+            display: block;
+            font-size: 0.7rem;
+            color: #666;
+            margin-bottom: 0.5rem;
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        .blinking-cursor::after {
+            content: '█';
+            animation: blink 1s step-start infinite;
+            margin-left: 4px;
+        }
+
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* 結果表示アニメーション */
+        .result-display {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.5);
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            /* 雲と同化しないよう強力なドロップシャドウで可読性を確保 */
+            text-shadow: 
+                0 0 10px #000, 
+                0 0 20px #000, 
+                0 0 30px #00f2fe, 
+                0 0 40px #00f2fe;
+            text-align: center;
+        }
+
+        .result-display.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+
+        .glass-btn {
+            background: rgba(0, 242, 254, 0.05);
+            border: 1px solid rgba(0, 242, 254, 0.4);
+            backdrop-filter: blur(5px);
+            transition: all 0.3s;
+            box-shadow: 0 0 10px rgba(0, 242, 254, 0.1);
+        }
+
+        .glass-btn:hover:not(:disabled) {
+            background: rgba(0, 242, 254, 0.2);
+            box-shadow: 0 0 20px rgba(0, 242, 254, 0.4);
+            transform: translateY(-2px);
+            border-color: #00f2fe;
+        }
+
+        .glass-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+            border-color: #333;
+            color: #555;
+            box-shadow: none;
+        }
+
+        .bg-grid {
+            background-image: 
+                linear-gradient(rgba(0, 242, 254, 0.1) 1px, transparent 1px), 
+                linear-gradient(90deg, rgba(0, 242, 254, 0.1) 1px, transparent 1px); 
+            background-size: 30px 30px;
+        }
+    </style>
+</head>
+<body class="relative">
+
+    <!-- 背景グリッド -->
+    <div class="absolute inset-0 z-0 bg-grid opacity-30 pointer-events-none"></div>
+
+    <!-- 左右のダミーデータストリーム（サイバー感の演出） -->
+    <div class="absolute top-24 left-4 z-0 text-[10px] text-cyan-900 font-mono hidden md:block opacity-60 leading-tight tracking-widest" id="data-stream-left"></div>
+    <div class="absolute top-24 right-4 z-0 text-[10px] text-red-900 font-mono hidden md:block text-right opacity-60 leading-tight tracking-widest" id="data-stream-right"></div>
+
+    <!-- ヘッダー -->
+    <header class="z-10 p-3 md:p-4 border-b border-gray-800 flex justify-between items-center bg-black/60 backdrop-blur-md">
+        <div class="flex items-center gap-3">
+            <div class="w-3 h-3 bg-red-600 rounded-full animate-pulse shadow-[0_0_10px_red]"></div>
+            <h1 class="text-sm md:text-xl font-bold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-gray-100 to-gray-400 tech-font">
+                BAN-GIME <span class="text-red-500">AI_KU-MO</span> SYS
+            </h1>
+        </div>
+        <div class="flex items-center gap-4">
+            <div class="text-[10px] md:text-xs text-cyan-500 tech-font hidden md:block">SECURE CONNECTION</div>
+            <!-- フルスクリーン切り替えボタン -->
+            <button id="fullscreen-btn" class="text-gray-400 hover:text-white transition-colors cursor-pointer" title="全画面表示切替">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                </svg>
+            </button>
+        </div>
+    </header>
+
+    <!-- メイン領域 -->
+    <main class="flex-1 flex flex-col justify-center items-center z-10 relative px-4">
+        
+        <!-- AIハヤトのビジュアル -->
+        <div class="ai-cloud-container mt-4" id="ai-container">
+            <div class="ai-cloud-1"></div>
+            <div class="ai-cloud-2"></div>
+            <div class="ai-core"></div>
+            
+            <!-- 抽選結果表示 -->
+            <div id="result-display" class="result-display flex flex-col items-center justify-center">
+                <div class="flex items-baseline gap-2">
+                    <span id="result-table" class="text-7xl md:text-8xl font-black text-white"></span>
+                </div>
+                <div id="result-number" class="text-2xl md:text-3xl font-bold text-cyan-100 mt-1 tracking-widest"></div>
+            </div>
+        </div>
+
+        <!-- AIメッセージターミナル -->
+        <div class="terminal font-bold text-sm md:text-base tracking-wide" id="terminal">
+            <!-- テキストがここに打ち込まれます -->
+        </div>
+
+        <!-- 抽選実行ボタン -->
+        <div class="mt-4 md:mt-8">
+            <button id="draw-btn" class="glass-btn px-8 py-3 md:px-12 md:py-4 text-lg md:text-xl font-bold rounded-full tracking-widest text-cyan-50 tech-font flex items-center gap-3">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                EXECUTE / 解析開始
+            </button>
+        </div>
+    </main>
+
+    <!-- 管理用：残席表示パネル (右下) -->
+    <div class="absolute bottom-4 right-4 z-20 bg-black/80 border border-gray-800 p-3 rounded-lg backdrop-blur-md text-[10px] md:text-xs font-mono text-gray-400 min-w-[150px]">
+        <div class="flex justify-between items-center mb-2 pb-1 border-b border-gray-700">
+            <span class="text-cyan-500 tech-font">CAPACITY</span>
+            <span id="total-seats" class="text-white font-bold"></span>
+        </div>
+        <div id="admin-stats" class="grid grid-cols-2 gap-x-6 gap-y-1">
+            <!-- JSで動的に残席が挿入されます -->
+        </div>
+    </div>
+
+    <!-- アプリケーション・ロジック -->
+    <script>
+        /**
+         * =========================================================
+         * 【設定エリア】
+         * ここの数値を変更することで、各テーブルの座席数を自由に設定できます。
+         * 例: 'A': 6 は「Aテーブルに6人」という意味です。
+         * =========================================================
+         */
+        const seatConfig = {
+            'A': 6,
+            'B': 7,
+            'C': 6,
+            'D': 7,
+            'E': 6
+        };
+
+        // =========================================================
+        // システムロジック（ここから下は基本的には変更不要です）
+        // =========================================================
+        
+        let pool = [];
+        let totalSeats = 0;
+        let remainingTableCounts = {};
+        
+        const terminal = document.getElementById('terminal');
+        const btn = document.getElementById('draw-btn');
+        const aiContainer = document.getElementById('ai-container');
+        const resultDisplay = document.getElementById('result-display');
+        const resultTable = document.getElementById('result-table');
+        const resultNumber = document.getElementById('result-number');
+        const dataStreamLeft = document.getElementById('data-stream-left');
+        const dataStreamRight = document.getElementById('data-stream-right');
+        
+        let dataStreamInterval;
+
+        // 初期化処理
+        function init() {
+            pool = [];
+            totalSeats = 0;
+            remainingTableCounts = {};
+
+            for (const [table, count] of Object.entries(seatConfig)) {
+                remainingTableCounts[table] = count;
+                for (let i = 1; i <= count; i++) {
+                    // テーブル名と座席番号をセットにして配列に格納
+                    pool.push({ table: table, number: i });
+                }
+                totalSeats += count;
+            }
+            
+            // 配列をシャッフル（偏りをなくすため）
+            for (let i = pool.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [pool[i], pool[j]] = [pool[j], pool[i]];
+            }
+            
+            updateAdminPanel();
+            typeText("AIクーモ起動完了。座席割り当てシステムの準備が整いました。");
+        }
+
+        // 残席数の表示更新
+        function updateAdminPanel() {
+            document.getElementById('total-seats').innerText = pool.length + " / " + totalSeats;
+            const statsContainer = document.getElementById('admin-stats');
+            statsContainer.innerHTML = '';
+            
+            for (const [table, count] of Object.entries(remainingTableCounts)) {
+                const div = document.createElement('div');
+                div.className = "flex justify-between";
+                // 残り0席の場合は赤色にする
+                div.innerHTML = `<span>Table ${table}</span><span class="${count === 0 ? 'text-red-500' : 'text-cyan-300'}">${count}</span>`;
+                statsContainer.appendChild(div);
+            }
+        }
+
+        // タイピング風アニメーション関数
+        async function typeText(text, speed = 40) {
+            terminal.innerHTML = '';
+            terminal.classList.add('blinking-cursor');
+            for (let i = 0; i < text.length; i++) {
+                terminal.innerHTML += text.charAt(i);
+                await new Promise(r => setTimeout(r, speed));
+            }
+            terminal.classList.remove('blinking-cursor');
+        }
+
+        // 背景のダミーデータストリーム（サイバー感演出）
+        function updateDataStream() {
+            let htmlLeft = '';
+            let htmlRight = '';
+            for(let i=0; i<25; i++) {
+                htmlLeft += Math.random().toString(16).substr(2, 8).toUpperCase() + ' ' + Math.random().toString(16).substr(2, 4).toUpperCase() + '<br>';
+                htmlRight += Math.random().toString(16).substr(2, 4).toUpperCase() + ' ' + Math.random().toString(16).substr(2, 8).toUpperCase() + '<br>';
+            }
+            dataStreamLeft.innerHTML = htmlLeft;
+            dataStreamRight.innerHTML = htmlRight;
+        }
+
+        // 抽選実行ロジック
+        btn.addEventListener('click', async () => {
+            if (pool.length === 0) {
+                terminal.classList.remove('thinking-mode');
+                await typeText("⚠️ 警告：全ての座席がすでに割り当てられています。");
+                return;
+            }
+            if (btn.disabled) return;
+
+            // UIを抽選中（思考中）の状態へ変更
+            btn.disabled = true;
+            resultDisplay.classList.remove('show');
+            aiContainer.classList.add('thinking');
+            terminal.classList.add('thinking-mode');
+            dataStreamInterval = setInterval(updateDataStream, 50);
+
+            // 劇中のようなセリフを演出
+            await typeText("対象者のデータをスキャン中...");
+            await new Promise(r => setTimeout(r, 600));
+
+            await typeText("祥雲データベースと照合... 最適配置を計算中...");
+            await new Promise(r => setTimeout(r, 600));
+            
+            await typeText("95.8%... 間違いありません。", 60); // ちょっとゆっくりもったいぶる
+            await new Promise(r => setTimeout(r, 500));
+
+            // 座席の確定
+            const seat = pool.pop(); // シャッフル済みの配列から1つ取り出す
+            remainingTableCounts[seat.table]--; // 管理用カウントを減らす
+            updateAdminPanel();
+
+            // 演出終了、結果の表示
+            clearInterval(dataStreamInterval);
+            aiContainer.classList.remove('thinking');
+            terminal.classList.remove('thinking-mode');
+            
+            // 結果を画面中央の大きな文字にセット
+            resultTable.innerText = seat.table;
+            resultNumber.innerText = "- " + seat.number + " -";
+            resultDisplay.classList.add('show');
+
+            await typeText(`AIクーモ： 座席は「 ${seat.table} テーブルの ${seat.number} 番 」に確定しました。`);
+            
+            btn.disabled = false;
+        });
+
+        // フルスクリーン切り替えロジック
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message}`);
+                });
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                }
+            }
+        });
+
+        // ページ読み込み時に初期化
+        window.onload = init;
+    </script>
+</body>
+</html>
